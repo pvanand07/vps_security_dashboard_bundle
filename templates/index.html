@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ app_name }}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div><p class="eyebrow">Security Operations</p><h1>{{ app_name }}</h1></div>
+      <button onclick="refreshData()">Refresh</button>
+    </header>
+    <section class="cards">
+      <div class="card"><span>Total Events</span><strong id="total">{{ data.total }}</strong></div>
+      <div class="card"><span>High/Critical</span><strong id="highCount">{{ data.recent_high|length }}</strong></div>
+      <div class="card"><span>Top Source IP</span><strong>{{ data.top_ips[0].ip if data.top_ips else 'None' }}</strong></div>
+      <div class="card"><span>Status</span><strong>Monitoring</strong></div>
+    </section>
+    <section class="grid">
+      <div class="panel"><h2>Events by Severity</h2><canvas id="severityChart"></canvas></div>
+      <div class="panel"><h2>Top Attacking / Noisy IPs</h2><canvas id="ipChart"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2>Recent Security Events</h2>
+      <div class="filters"><input id="filterIp" placeholder="Filter by IP"><select id="filterSeverity"><option value="">All severities</option><option>critical</option><option>high</option><option>medium</option><option>low</option><option>info</option></select><button onclick="loadEvents()">Apply</button></div>
+      <table><thead><tr><th>Time</th><th>Severity</th><th>Category</th><th>Source</th><th>IP</th><th>User</th><th>Message</th></tr></thead><tbody id="eventsBody">
+      {% for e in events %}<tr><td>{{ e.ts }}</td><td><span class="pill {{ e.severity }}">{{ e.severity }}</span></td><td>{{ e.category }}</td><td>{{ e.source }}</td><td>{{ e.ip or '' }}</td><td>{{ e.username or '' }}</td><td>{{ e.message }}</td></tr>{% endfor %}
+      </tbody></table>
+    </section>
+  </div>
+<script>
+let severityChart, ipChart;
+async function fetchSummary(){ const r = await fetch('/api/summary'); return await r.json(); }
+function drawCharts(data){
+ const sevLabels=data.by_severity.map(x=>x.severity); const sevValues=data.by_severity.map(x=>x.count);
+ const ipLabels=data.top_ips.map(x=>x.ip); const ipValues=data.top_ips.map(x=>x.count);
+ if(severityChart) severityChart.destroy(); if(ipChart) ipChart.destroy();
+ severityChart=new Chart(document.getElementById('severityChart'),{type:'doughnut',data:{labels:sevLabels,datasets:[{data:sevValues}]},options:{plugins:{legend:{labels:{color:'#dbe7ff'}}}}});
+ ipChart=new Chart(document.getElementById('ipChart'),{type:'bar',data:{labels:ipLabels,datasets:[{label:'Events',data:ipValues}]},options:{scales:{x:{ticks:{color:'#dbe7ff'}},y:{ticks:{color:'#dbe7ff'}}},plugins:{legend:{labels:{color:'#dbe7ff'}}}}});
+}
+async function loadEvents(){
+ const ip=document.getElementById('filterIp').value; const sev=document.getElementById('filterSeverity').value;
+ const r=await fetch(`/api/events?limit=200&ip=${encodeURIComponent(ip)}&severity=${encodeURIComponent(sev)}`); const rows=await r.json();
+ document.getElementById('eventsBody').innerHTML=rows.map(e=>`<tr><td>${e.ts||''}</td><td><span class="pill ${e.severity}">${e.severity}</span></td><td>${e.category||''}</td><td>${e.source||''}</td><td>${e.ip||''}</td><td>${e.username||''}</td><td>${(e.message||'').replace(/[<>]/g,'')}</td></tr>`).join('');
+}
+async function refreshData(){ await fetch('/api/ingest'); const data=await fetchSummary(); document.getElementById('total').innerText=data.total; document.getElementById('highCount').innerText=data.recent_high.length; drawCharts(data); await loadEvents(); }
+fetchSummary().then(drawCharts); setInterval(refreshData, 30000);
+</script>
+</body></html>
