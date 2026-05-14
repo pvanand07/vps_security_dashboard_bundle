@@ -1,7 +1,14 @@
-from fastapi import FastAPI, Request, Query
+import os
+import time
+import socket
+import platform
+import subprocess
+from pathlib import Path
+from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import psutil
 from .collector import ingest_tail
 from .db import query_events, summary
 from .config import APP_NAME
@@ -29,3 +36,64 @@ def api_events(limit: int = Query(200, le=2000), source: str | None = None, seve
 def api_summary():
     ingest_tail(2000)
     return summary()
+
+@app.get("/api/system")
+def api_system():
+    boot_time = psutil.boot_time()
+    uptime_seconds = int(time.time() - boot_time)
+
+    cpu_percent = psutil.cpu_percent(interval=0.5)
+    cpu_count = psutil.cpu_count(logical=True)
+
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    net = psutil.net_io_counters()
+
+    try:
+        hostname = socket.gethostname()
+    except Exception:
+        hostname = "unknown"
+
+    try:
+        machine_id = Path("/etc/machine-id").read_text().strip()
+    except Exception:
+        machine_id = "unknown"
+
+    try:
+        os_release_lines = Path("/etc/os-release").read_text().splitlines()
+        os_release = {}
+        for line in os_release_lines:
+            if "=" in line:
+                k, _, v = line.partition("=")
+                os_release[k.strip()] = v.strip().strip('"')
+        os_name = os_release.get("PRETTY_NAME", platform.platform())
+    except Exception:
+        os_name = platform.platform()
+
+    return {
+        "hostname": hostname,
+        "os": os_name,
+        "machine_id": machine_id,
+        "uptime_seconds": uptime_seconds,
+        "boot_time": boot_time,
+        "cpu_percent": cpu_percent,
+        "cpu_count": cpu_count,
+        "memory_total_bytes": mem.total,
+        "memory_used_bytes": mem.used,
+        "memory_percent": mem.percent,
+        "disk_total_bytes": disk.total,
+        "disk_used_bytes": disk.used,
+        "disk_percent": disk.percent,
+        "net_bytes_sent": net.bytes_sent,
+        "net_bytes_recv": net.bytes_recv,
+        "platform": platform.machine(),
+    }
+
+@app.post("/api/reboot")
+def api_reboot():
+    try:
+        subprocess.Popen(["shutdown", "-r", "+1"])
+        return {"status": "reboot_scheduled", "message": "System will reboot in 1 minute"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
