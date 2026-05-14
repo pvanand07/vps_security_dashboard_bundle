@@ -16,6 +16,7 @@ RUN pip install --upgrade pip \
 COPY app ./app
 COPY static ./static
 COPY templates ./templates
+RUN touch /app/host-utmp
 
 EXPOSE 8090
 
