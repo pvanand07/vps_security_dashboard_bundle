@@ -13,6 +13,8 @@ services:
       - /tmp
     cap_drop:
       - ALL
+    cap_add:
+      - SYS_BOOT
     security_opt:
       - no-new-privileges:true
 
