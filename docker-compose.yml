@@ -12,10 +12,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    user: root
     cap_drop:
       - ALL
     cap_add:
       - SYS_BOOT
+      - NET_ADMIN
     security_opt:
       - no-new-privileges:true
 
