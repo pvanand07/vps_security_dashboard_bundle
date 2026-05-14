@@ -4,7 +4,7 @@ services:
     container_name: vps-security-dashboard
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8090:8090"
+      - "0.0.0.0:8090:8090"
     volumes:
       - vpsdash-data:/var/lib/vps-security-dashboard
       - /var/log:/var/log:ro
