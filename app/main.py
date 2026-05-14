@@ -107,7 +107,7 @@ def api_ssh_sessions():
     UT_TYPE_USER_PROCESS = 7
     UTMP_STRUCT = "hi32s4s32s256shhiii4i20s"
     UTMP_SIZE = struct.calcsize(UTMP_STRUCT)
-    utmp_path = Path("/var/run/utmp")
+    utmp_path = Path("/host/utmp")
     try:
         with open(utmp_path, "rb") as f:
             data = f.read()
