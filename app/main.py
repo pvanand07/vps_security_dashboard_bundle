@@ -100,21 +100,56 @@ def api_reboot():
 
 @app.get("/api/ssh-sessions")
 def api_ssh_sessions():
-    sessions = []
+    import re
+    from collections import OrderedDict
+    sessions: OrderedDict = OrderedDict()
+    open_pat = re.compile(
+        r"(\w+\s+\d+\s+\d+:\d+:\d+).*sshd\[(\d+)\].*session opened for user (\S+?)(?:\(uid=\d+\))? by"
+    )
+    close_pat = re.compile(
+        r"sshd\[(\d+)\].*session closed for user (\S+)"
+    )
+    ip_pat = re.compile(
+        r"(\w+\s+\d+\s+\d+:\d+:\d+).*sshd\[(\d+)\].*Accepted (?:password|publickey) for (\S+) from ([\d\.a-fA-F:]+)"
+    )
+    pid_to_ip: dict = {}
     try:
-        for u in psutil.users():
-            login_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(u.started))
-            sessions.append({
-                "user": u.name,
-                "tty": u.terminal or "?",
-                "date": login_time.split()[0],
-                "time": login_time.split()[1],
-                "pid": str(u.pid) if u.pid else None,
-                "from": u.host or "",
-            })
+        log_paths = [Path("/var/log/auth.log.1"), Path("/var/log/auth.log")]
+        for log_path in log_paths:
+            if not log_path.exists():
+                continue
+            with open(log_path, "r", errors="replace") as f:
+                for line in f:
+                    m = ip_pat.search(line)
+                    if m:
+                        pid_to_ip[m.group(2)] = {"ip": m.group(4), "ts": m.group(1), "user": m.group(3)}
+                    m = open_pat.search(line)
+                    if m:
+                        pid = m.group(2)
+                        sessions[pid] = {
+                            "user": m.group(3),
+                            "pid": pid,
+                            "ts": m.group(1),
+                            "from": pid_to_ip.get(pid, {}).get("ip", ""),
+                        }
+                    m = close_pat.search(line)
+                    if m:
+                        sessions.pop(m.group(1), None)
     except Exception as e:
         return {"sessions": [], "error": str(e)}
-    return {"sessions": sessions, "count": len(sessions)}
+
+    result = []
+    for pid, s in sessions.items():
+        parts = s["ts"].split()
+        result.append({
+            "user": s["user"],
+            "tty": f"sshd/{pid}",
+            "date": f"{parts[0]} {parts[1]}",
+            "time": parts[2] if len(parts) > 2 else "",
+            "pid": pid,
+            "from": s["from"],
+        })
+    return {"sessions": result, "count": len(result)}
 
 
 @app.get("/api/failed-usernames")
