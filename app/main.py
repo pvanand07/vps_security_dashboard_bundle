@@ -98,6 +98,70 @@ def api_reboot():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/ssh-sessions")
+def api_ssh_sessions():
+    sessions = []
+    try:
+        result = subprocess.run(["who", "-u"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 5:
+                user = parts[0]
+                tty = parts[1]
+                date = parts[2]
+                time_str = parts[3]
+                pid = parts[4] if parts[4].isdigit() else None
+                from_host = ""
+                for p in parts[5:]:
+                    if p.startswith("(") and p.endswith(")"):
+                        from_host = p.strip("()")
+                sessions.append({
+                    "user": user,
+                    "tty": tty,
+                    "date": date,
+                    "time": time_str,
+                    "pid": pid,
+                    "from": from_host,
+                })
+    except Exception as e:
+        return {"sessions": [], "error": str(e)}
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@app.get("/api/failed-usernames")
+def api_failed_usernames(limit: int = Query(20, le=100)):
+    from collections import Counter
+    import re
+    counts: Counter = Counter()
+    try:
+        log_paths = [
+            Path("/var/log/auth.log"),
+            Path("/var/log/auth.log.1"),
+            Path("/var/log/secure"),
+        ]
+        pattern = re.compile(
+            r"Invalid user (\S+)|Failed password for(?: invalid user)? (\S+) from"
+        )
+        for log_path in log_paths:
+            if not log_path.exists():
+                continue
+            try:
+                with open(log_path, "r", errors="replace") as f:
+                    for line in f:
+                        m = pattern.search(line)
+                        if m:
+                            username = m.group(1) or m.group(2)
+                            if username:
+                                counts[username] += 1
+            except PermissionError:
+                continue
+    except Exception as e:
+        return {"usernames": [], "error": str(e)}
+
+    top = [{"username": u, "attempts": c} for u, c in counts.most_common(limit)]
+    return {"usernames": top, "total_unique": len(counts), "total_attempts": sum(counts.values())}
+
+
 @app.post("/api/unblock")
 async def api_unblock(request: Request):
     import re
