@@ -100,39 +100,17 @@ def api_reboot():
 
 @app.get("/api/ssh-sessions")
 def api_ssh_sessions():
-    import struct
     sessions = []
-    # utmp entry format (Linux x86_64)
-    # see /usr/include/bits/utmp.h
-    UT_TYPE_USER_PROCESS = 7
-    UTMP_STRUCT = "hi32s4s32s256shhiii4i20s"
-    UTMP_SIZE = struct.calcsize(UTMP_STRUCT)
-    utmp_path = Path("/app/host-utmp")
     try:
-        with open(utmp_path, "rb") as f:
-            data = f.read()
-        offset = 0
-        while offset + UTMP_SIZE <= len(data):
-            entry = struct.unpack_from(UTMP_STRUCT, data, offset)
-            offset += UTMP_SIZE
-            ut_type = entry[0]
-            if ut_type != UT_TYPE_USER_PROCESS:
-                continue
-            ut_pid = entry[1]
-            ut_line = entry[2].rstrip(b"\x00").decode("utf-8", errors="replace")
-            ut_user = entry[4].rstrip(b"\x00").decode("utf-8", errors="replace")
-            ut_host = entry[5].rstrip(b"\x00").decode("utf-8", errors="replace")
-            ut_tv_sec = entry[9]
-            login_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(ut_tv_sec))
-            if not ut_user:
-                continue
+        for u in psutil.users():
+            login_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(u.started))
             sessions.append({
-                "user": ut_user,
-                "tty": ut_line,
+                "user": u.name,
+                "tty": u.terminal or "?",
                 "date": login_time.split()[0],
                 "time": login_time.split()[1],
-                "pid": str(ut_pid),
-                "from": ut_host,
+                "pid": str(u.pid) if u.pid else None,
+                "from": u.host or "",
             })
     except Exception as e:
         return {"sessions": [], "error": str(e)}
