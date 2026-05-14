@@ -9,6 +9,7 @@ services:
       - vpsdash-data:/var/lib/vps-security-dashboard
       - /var/log:/var/log:ro
       - /run/fail2ban:/run/fail2ban
+      - /etc/machine-id:/etc/machine-id:ro
     read_only: true
     tmpfs:
       - /tmp
