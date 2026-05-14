@@ -1,0 +1,192 @@
+# =============================================================================
+# FAIL2BAN – MODE 3: PARANOID
+# Maximum aggression. Cross-jail escalation, near-permanent recidive bans,
+# AbuseIPDB reporting, very low failure tolerance.
+# Suited for hardened public-facing servers where false positives are acceptable.
+# All values verified against fail2ban/fail2ban master (v1.1.1-dev).
+# =============================================================================
+
+[DEFAULT]
+
+# ── Detection window ──────────────────────────────────────────────────────────
+bantime  = 6h           ; first offence already costs half a day
+findtime = 5m           ; tight 5-minute window — catches burst scanners fast
+maxretry = 3            ; 3 strikes and you're out
+
+# ── Incremental banning ───────────────────────────────────────────────────────
+# Aggressive ramp-up: bans grow 1× → 5× → 30× → 60× → 5× hrs → 12× hrs …
+# For bantime=6h the series in real time:
+#   1st ban → 6h  |  2nd → 30h  |  3rd → 180h (~7.5d)  |  4th → 360h (~15d)
+#   5th+ capped at 4w (bantime.maxtime)
+bantime.increment    = true
+bantime.factor       = 1
+bantime.multipliers  = 1 5 30 60 300 720 1440 2880
+bantime.maxtime      = 4w            ; 4-week ceiling
+bantime.rndtime      = 15m           ; up to 15-min jitter on every unban
+bantime.overalljails = true          ; ban counter aggregated ACROSS all jails
+                                     ; ← key difference from Enhanced mode;
+                                     ;   hitting nginx once + sshd once counts as 2
+
+# ── Whitelisting ─────────────────────────────────────────────────────────────
+ignoreself = true
+ignoreip   = 127.0.0.1/8 ::1        ; ← CRITICAL: add ALL your admin/CI IPs here
+                                     ;   or you will lock yourself out during incidents
+# ignorecommand = /usr/local/bin/f2b-allowlist <ip>   ; optional dynamic allowlist script
+
+# ── Network / firewall ────────────────────────────────────────────────────────
+# DROP everywhere — no error response, no ICMP, nothing.
+banaction          = iptables-multiport[blocktype=DROP]
+banaction_allports = iptables-allports[blocktype=DROP]
+
+# ── DNS ───────────────────────────────────────────────────────────────────────
+usedns = no             ; never trust hostnames in logs, ban IP only
+
+# ── Backend ───────────────────────────────────────────────────────────────────
+backend = auto
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+# Uncomment and fill to receive ban alerts by email:
+# destemail = ops@example.com
+# sender    = fail2ban@yourhostname
+# mta       = sendmail
+# action    = %(action_mwl)s   ; ban + whois + matching log lines in email
+
+
+# =============================================================================
+# JAILS
+# =============================================================================
+
+# ── SSH ───────────────────────────────────────────────────────────────────────
+
+[sshd]
+# aggressive = normal + ddos + extra combined:
+#   - auth failures, invalid users, bad algorithms
+#   - connection floods (ddos patterns)
+#   - protocol violations, scanner fingerprints
+enabled  = true
+mode     = aggressive
+port     = ssh
+backend  = systemd
+maxretry = 2             ; only 2 attempts before ban (override DEFAULT for SSH)
+action   = %(action_)s
+           abuseipdb[abuseipdb_apikey="YOUR_API_KEY", abuseipdb_category="18,22"]
+           ; category 18=Brute-Force, 22=SSH  — remove if no AbuseIPDB account
+
+
+# ── Nginx ─────────────────────────────────────────────────────────────────────
+
+[nginx-http-auth]
+enabled  = true
+port     = http,https
+logpath  = %(nginx_error_log)s
+maxretry = 3
+
+[nginx-limit-req]
+enabled  = true
+port     = http,https
+logpath  = %(nginx_error_log)s
+maxretry = 2
+
+[nginx-botsearch]
+enabled  = true
+port     = http,https
+logpath  = %(nginx_error_log)s
+maxretry = 1             ; single probe = instant ban
+findtime = 1h            ; wider window for slow scanners
+
+[nginx-bad-request]
+enabled  = true
+port     = http,https
+logpath  = %(nginx_access_log)s
+maxretry = 2
+
+[nginx-forbidden]
+enabled  = true
+port     = http,https
+logpath  = %(nginx_error_log)s
+maxretry = 2
+
+
+# ── Apache (enable if using Apache instead of nginx) ──────────────────────────
+
+[apache-auth]
+enabled  = false
+port     = http,https
+logpath  = %(apache_error_log)s
+
+[apache-badbots]
+enabled  = false
+port     = http,https
+logpath  = %(apache_access_log)s
+maxretry = 1             ; known bad UA strings — zero tolerance
+
+[apache-noscript]
+enabled  = false
+port     = http,https
+logpath  = %(apache_error_log)s
+
+[apache-overflows]
+enabled  = false
+port     = http,https
+logpath  = %(apache_error_log)s
+maxretry = 2
+
+
+# ── Mail ─────────────────────────────────────────────────────────────────────
+
+[postfix]
+enabled  = false
+mode     = more
+port     = smtp,465,submission
+logpath  = %(postfix_log)s
+backend  = %(postfix_backend)s
+
+[postfix-sasl]
+enabled  = false
+filter   = postfix[mode=auth]
+port     = smtp,465,submission,imap,imaps,pop3,pop3s
+logpath  = %(postfix_log)s
+backend  = %(postfix_backend)s
+
+[dovecot]
+enabled  = false
+port     = pop3,pop3s,imap,imaps,submission,465,sieve
+logpath  = %(dovecot_log)s
+backend  = %(dovecot_backend)s
+
+[roundcube-auth]
+enabled  = false
+port     = http,https
+logpath  = %(roundcube_errors_log)s
+
+
+# ── Databases (enable if exposed — ideally these ports should never be public) ─
+
+[mysqld-auth]
+enabled  = false
+port     = 3306
+logpath  = %(mysql_log)s
+backend  = %(mysql_backend)s
+
+[mongodb-auth]
+enabled  = false
+port     = 27017
+logpath  = /var/log/mongodb/mongod.log
+
+
+# ── Recidive ──────────────────────────────────────────────────────────────────
+# Cross-jail aggregation (bantime.overalljails=true above) means this jail sees
+# an IP sooner than in Enhanced mode.
+
+[recidive]
+# 2 bans anywhere within 6h → permanent (-1) all-ports ban
+enabled   = true
+logpath   = /var/log/fail2ban.log
+banaction = %(banaction_allports)s
+bantime   = -1            ; permanent — requires manual unban:
+                          ;   fail2ban-client set recidive unbanip <IP>
+findtime  = 6h
+maxretry  = 2
+action    = %(action_)s
+            abuseipdb[abuseipdb_apikey="YOUR_API_KEY", abuseipdb_category="18,14"]
+            ; category 14=Port Scan, 18=Brute-Force

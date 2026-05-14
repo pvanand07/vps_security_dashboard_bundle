@@ -1,0 +1,64 @@
+# =============================================================================
+# FAIL2BAN – MODE 1: STANDARD
+# Balanced defaults. Good for personal servers, dev boxes, low-traffic VMs.
+# Bans are short and temporary. Only SSH and recidive jails active.
+# All values verified against fail2ban/fail2ban master (v1.1.1-dev).
+# =============================================================================
+
+[DEFAULT]
+
+# ── Detection window ──────────────────────────────────────────────────────────
+bantime  = 10m          ; initial ban duration
+findtime = 10m          ; sliding window to count failures
+maxretry = 5            ; failures within findtime before ban
+
+# ── Incremental banning ───────────────────────────────────────────────────────
+# Disabled in Standard mode. Repeat offenders serve the same flat bantime.
+# bantime.increment = false (implicit default)
+
+# ── Whitelisting ─────────────────────────────────────────────────────────────
+ignoreself = true                         ; never ban own host IPs
+ignoreip   = 127.0.0.1/8 ::1             ; add your admin IP: 203.0.113.10
+
+# ── Network / firewall ────────────────────────────────────────────────────────
+# REJECT tells the client the port is closed. Less stealthy, cleaner logs.
+banaction          = iptables-multiport[blocktype=REJECT --reject-with icmp-port-unreachable]
+banaction_allports = iptables-allports[blocktype=REJECT --reject-with icmp-port-unreachable]
+
+# ── DNS ───────────────────────────────────────────────────────────────────────
+usedns = warn           ; resolve hostnames but log a warning
+
+# ── Backend ───────────────────────────────────────────────────────────────────
+backend = auto          ; auto-selects pyinotify → polling
+
+# ── Database ─────────────────────────────────────────────────────────────────
+# (configured in fail2ban.conf, shown here for reference)
+# dbfile     = /var/lib/fail2ban/fail2ban.sqlite3
+# dbpurgeage = 1d
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# (configured in fail2ban.conf)
+# loglevel   = INFO
+# logtarget  = /var/log/fail2ban.log
+
+
+# =============================================================================
+# JAILS
+# =============================================================================
+
+[sshd]
+# Covers: password brute-force, invalid users, protocol errors
+enabled = true
+mode    = normal           ; catches standard auth failures only
+port    = ssh
+backend = systemd          ; use 'auto' if not on systemd
+
+
+[recidive]
+# Bans IPs that keep getting banned by other jails (reads fail2ban.log)
+enabled  = true
+logpath  = /var/log/fail2ban.log
+banaction = %(banaction_allports)s   ; block ALL ports for repeat offenders
+bantime  = 1w
+findtime = 1d
+maxretry = 5              ; 5 bans across any jail within 1 day → 1-week block

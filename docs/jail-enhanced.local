@@ -1,0 +1,119 @@
+# =============================================================================
+# FAIL2BAN – MODE 2: ENHANCED
+# Incremental banning, silent DROP, broader jail coverage.
+# Suited for production web servers and internet-facing APIs.
+# All values verified against fail2ban/fail2ban master (v1.1.1-dev).
+# =============================================================================
+
+[DEFAULT]
+
+# ── Detection window ──────────────────────────────────────────────────────────
+bantime  = 1h           ; first offence → 1h ban (escalates with .increment)
+findtime = 10m          ; 10-minute window for counting failures
+maxretry = 4            ; tighter than default (5)
+
+# ── Incremental banning ───────────────────────────────────────────────────────
+# Each time an IP is banned, the duration grows through the multiplier series.
+# With bantime=1h and the series below:
+#   1st ban → 1h  |  2nd → 2h  |  3rd → 4h  |  4th → 8h  |  5th → 16h
+#   6th  → 32h    |  7th+ → 64h (capped, ~2.7 days)
+bantime.increment   = true
+bantime.factor      = 1
+bantime.multipliers = 1 2 4 8 16 32 64
+bantime.maxtime     = 3d           ; absolute ceiling for escalation
+bantime.rndtime     = 5m           ; ±5 min jitter so botnets can't time unban
+bantime.overalljails = false       ; counts per jail (sshd bans don't affect nginx counter)
+
+# ── Whitelisting ─────────────────────────────────────────────────────────────
+ignoreself = true
+ignoreip   = 127.0.0.1/8 ::1      ; add your IPs: 203.0.113.10 10.10.0.0/24
+
+# ── Network / firewall ────────────────────────────────────────────────────────
+# DROP silently discards packets — no response to scanner, no RST to attacker.
+banaction          = iptables-multiport[blocktype=DROP]
+banaction_allports = iptables-allports[blocktype=DROP]
+
+# ── DNS ───────────────────────────────────────────────────────────────────────
+usedns = warn
+
+# ── Backend ───────────────────────────────────────────────────────────────────
+backend = auto
+
+
+# =============================================================================
+# JAILS
+# =============================================================================
+
+# ── SSH ───────────────────────────────────────────────────────────────────────
+
+[sshd]
+# extra mode adds: bad algo negotiation, connection flood, protocol violations
+enabled = true
+mode    = extra
+port    = ssh
+backend = systemd
+
+
+# ── Nginx ─────────────────────────────────────────────────────────────────────
+
+[nginx-http-auth]
+# 401 / 403 on password-protected resources
+enabled  = true
+port     = http,https
+logpath  = %(nginx_error_log)s
+
+[nginx-limit-req]
+# Catches limit_req module rejections (rate-limit bursts, flood probes)
+# Requires: limit_req_zone + limit_req directives in nginx.conf
+enabled  = true
+port     = http,https
+logpath  = %(nginx_error_log)s
+
+[nginx-botsearch]
+# Scanners probing for common vulnerable paths (phpMyAdmin, .env, wp-login …)
+enabled  = true
+port     = http,https
+logpath  = %(nginx_error_log)s
+maxretry = 2              ; very low tolerance for path scanning
+
+[nginx-bad-request]
+# Malformed request lines (protocol violations, null-byte injection, …)
+enabled  = true
+port     = http,https
+logpath  = %(nginx_access_log)s
+maxretry = 3
+
+
+# ── Mail (enable if running a mail stack) ────────────────────────────────────
+
+[postfix]
+enabled  = false          ; set true if running Postfix
+mode     = more           ; catches extra patterns vs. default 'normal'
+port     = smtp,465,submission
+logpath  = %(postfix_log)s
+backend  = %(postfix_backend)s
+
+[postfix-sasl]
+enabled  = false
+filter   = postfix[mode=auth]
+port     = smtp,465,submission,imap,imaps,pop3,pop3s
+logpath  = %(postfix_log)s
+backend  = %(postfix_backend)s
+
+[dovecot]
+enabled  = false
+port     = pop3,pop3s,imap,imaps,submission,465,sieve
+logpath  = %(dovecot_log)s
+backend  = %(dovecot_backend)s
+
+
+# ── Recidive ──────────────────────────────────────────────────────────────────
+
+[recidive]
+# 3 bans across any jail in 12h → 1-week all-ports block
+enabled  = true
+logpath  = /var/log/fail2ban.log
+banaction = %(banaction_allports)s
+bantime  = 1w
+findtime = 12h
+maxretry = 3
