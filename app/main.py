@@ -97,3 +97,32 @@ def api_reboot():
         return {"status": "reboot_scheduled", "message": "System will reboot in 1 minute"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/unblock")
+async def api_unblock(request: Request):
+    import re
+    try:
+        body = await request.json()
+        ip = body.get("ip", "").strip()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    if not ip:
+        raise HTTPException(status_code=400, detail="Missing 'ip' field")
+
+    if not re.match(r"^[\d\.a-fA-F:]+$", ip):
+        raise HTTPException(status_code=400, detail="Invalid IP address format")
+
+    try:
+        result = subprocess.run(
+            ["fail2ban-client", "set", "sshd", "unbanip", ip],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            return {"status": "unblocked", "ip": ip, "message": f"{ip} has been unblocked"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr.strip() or "fail2ban-client failed")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="fail2ban-client timed out")
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="fail2ban-client not found on host")
