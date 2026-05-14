@@ -104,13 +104,13 @@ def api_ssh_sessions():
     from collections import OrderedDict
     sessions: OrderedDict = OrderedDict()
     open_pat = re.compile(
-        r"(\w+\s+\d+\s+\d+:\d+:\d+).*sshd\[(\d+)\].*session opened for user (\S+?)(?:\(uid=\d+\))? by"
+        r"^(\S+).*sshd[^\[]*\[(\d+)\].*session opened for user (\S+?)(?:\(uid=\d+\))? by"
     )
     close_pat = re.compile(
-        r"sshd\[(\d+)\].*session closed for user (\S+)"
+        r"sshd[^\[]*\[(\d+)\].*session closed for user (\S+)"
     )
     ip_pat = re.compile(
-        r"(\w+\s+\d+\s+\d+:\d+:\d+).*sshd\[(\d+)\].*Accepted (?:password|publickey) for (\S+) from ([\d\.a-fA-F:]+)"
+        r"^(\S+).*sshd[^\[]*\[(\d+)\].*Accepted (?:password|publickey) for (\S+) from ([\d\.a-fA-F:]+)"
     )
     pid_to_ip: dict = {}
     try:
@@ -140,12 +140,20 @@ def api_ssh_sessions():
 
     result = []
     for pid, s in sessions.items():
-        parts = s["ts"].split()
+        ts = s["ts"]
+        try:
+            # ISO 8601: 2026-05-14T11:16:28.464348+00:00
+            dt_part = ts.split("T")
+            date_str = dt_part[0]
+            time_str = dt_part[1][:8] if len(dt_part) > 1 else ""
+        except Exception:
+            date_str = ts
+            time_str = ""
         result.append({
             "user": s["user"],
-            "tty": f"sshd/{pid}",
-            "date": f"{parts[0]} {parts[1]}",
-            "time": parts[2] if len(parts) > 2 else "",
+            "tty": f"pts",
+            "date": date_str,
+            "time": time_str,
             "pid": pid,
             "from": s["from"],
         })
