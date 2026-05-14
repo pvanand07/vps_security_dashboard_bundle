@@ -10,7 +10,7 @@ services:
       - /var/log:/var/log:ro
       - /run/fail2ban:/run/fail2ban
       - /etc/machine-id:/etc/machine-id:ro
-      - /var/run/utmp:/run/host-utmp:ro
+      - /var/run/utmp:/app/host-utmp:ro
     read_only: true
     tmpfs:
       - /tmp
