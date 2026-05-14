@@ -60,7 +60,7 @@ def summary():
     total = conn.execute("SELECT COUNT(*) c FROM events").fetchone()["c"]
     by_sev = [dict(r) for r in conn.execute("SELECT severity, COUNT(*) count FROM events GROUP BY severity").fetchall()]
     by_cat = [dict(r) for r in conn.execute("SELECT category, COUNT(*) count FROM events GROUP BY category ORDER BY count DESC LIMIT 10").fetchall()]
-    top_ips = [dict(r) for r in conn.execute("SELECT ip, COUNT(*) count FROM events WHERE ip IS NOT NULL AND ip != '' GROUP BY ip ORDER BY count DESC LIMIT 10").fetchall()]
+    top_ips = [dict(r) for r in conn.execute("SELECT ip, COUNT(*) count FROM events WHERE ip IS NOT NULL AND ip != '' GROUP BY ip ORDER BY count DESC LIMIT 100").fetchall()]
     recent_high = [dict(r) for r in conn.execute("SELECT * FROM events WHERE severity IN ('critical','high') ORDER BY id DESC LIMIT 20").fetchall()]
     conn.close()
     return {"total": total, "by_severity": by_sev, "by_category": by_cat, "top_ips": top_ips, "recent_high": recent_high}
