@@ -3,7 +3,7 @@ set -euo pipefail
 APP_DIR=/opt/vps-security-dashboard
 SERVICE_FILE=/etc/systemd/system/vps-security-dashboard.service
 sudo mkdir -p "$APP_DIR" /var/lib/vps-security-dashboard
-sudo cp -r app templates static requirements.txt "$APP_DIR"/
+sudo cp -r app templates static docs requirements.txt "$APP_DIR"/
 cd "$APP_DIR"
 sudo python3 -m venv venv
 sudo ./venv/bin/pip install --upgrade pip
@@ -19,7 +19,7 @@ Description=VPS Security Dashboard
 After=network.target
 [Service]
 Type=simple
-User=vpsdash
+User=root
 Group=adm
 WorkingDirectory=$APP_DIR
 ExecStart=$APP_DIR/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090
@@ -28,6 +28,7 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+ReadWritePaths=/etc/fail2ban /var/lib/vps-security-dashboard
 ProtectHome=true
 [Install]
 WantedBy=multi-user.target

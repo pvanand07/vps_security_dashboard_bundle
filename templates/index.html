@@ -24,6 +24,35 @@
       <div class="panel"><h2>Top Attacking / Noisy IPs</h2><canvas id="ipChart"></canvas></div>
     </section>
     <section class="panel">
+      <div class="panel-heading">
+        <h2>Fail2Ban Controls</h2>
+        <button onclick="loadFail2Ban()">Refresh Fail2Ban</button>
+      </div>
+      <div id="fail2banMessage" class="status-message"></div>
+      <div class="fail2ban-grid">
+        <div>
+          <h3>Config Profile</h3>
+          <p class="muted">Switch between the bundled jail.local profiles. Existing dashboard whitelist entries are preserved.</p>
+          <div id="fail2banProfiles" class="profile-list"></div>
+        </div>
+        <div>
+          <h3>Whitelist</h3>
+          <p class="muted">Add trusted IPs or CIDR ranges to fail2ban ignoreip.</p>
+          <div class="filters"><input id="whitelistIp" placeholder="IP or CIDR, e.g. 203.0.113.10"><button onclick="addWhitelist()">Add to whitelist</button></div>
+          <div id="whitelistList" class="tag-list"></div>
+        </div>
+      </div>
+      <h3>Ban / Unban IPs</h3>
+      <div class="filters wrap">
+        <input id="fail2banSearch" placeholder="Search banned IPs or jails">
+        <button onclick="loadFail2Ban()">Search</button>
+        <input id="banJail" placeholder="Jail" value="sshd">
+        <input id="banAddress" placeholder="IP to ban">
+        <button onclick="banFail2BanIp()">Ban IP</button>
+      </div>
+      <div id="fail2banJails" class="jail-list"></div>
+    </section>
+    <section class="panel">
       <h2>Recent Security Events</h2>
       <div class="filters"><input id="filterIp" placeholder="Filter by IP"><select id="filterSeverity"><option value="">All severities</option><option>critical</option><option>high</option><option>medium</option><option>low</option><option>info</option></select><button onclick="loadEvents()">Apply</button></div>
       <table><thead><tr><th>Time</th><th>Severity</th><th>Category</th><th>Source</th><th>IP</th><th>User</th><th>Message</th></tr></thead><tbody id="eventsBody">
@@ -34,6 +63,19 @@
 <script>
 let severityChart, ipChart;
 async function fetchSummary(){ const r = await fetch('/api/summary'); return await r.json(); }
+function escapeHtml(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function showFail2BanMessage(message, isError=false){
+ const el=document.getElementById('fail2banMessage');
+ el.textContent=message||'';
+ el.className=`status-message ${isError?'error':'success'}`;
+}
+async function requestJson(url, options={}){
+ const r=await fetch(url,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});
+ let payload={};
+ try{ payload=await r.json(); }catch(e){ payload={}; }
+ if(!r.ok) throw new Error(payload.detail||`Request failed with status ${r.status}`);
+ return payload;
+}
 function drawCharts(data){
  const sevLabels=data.by_severity.map(x=>x.severity); const sevValues=data.by_severity.map(x=>x.count);
  const ipLabels=data.top_ips.map(x=>x.ip); const ipValues=data.top_ips.map(x=>x.count);
@@ -46,7 +88,92 @@ async function loadEvents(){
  const r=await fetch(`/api/events?limit=200&ip=${encodeURIComponent(ip)}&severity=${encodeURIComponent(sev)}`); const rows=await r.json();
  document.getElementById('eventsBody').innerHTML=rows.map(e=>`<tr><td>${e.ts||''}</td><td><span class="pill ${e.severity}">${e.severity}</span></td><td>${e.category||''}</td><td>${e.source||''}</td><td>${e.ip||''}</td><td>${e.username||''}</td><td>${(e.message||'').replace(/[<>]/g,'')}</td></tr>`).join('');
 }
-async function refreshData(){ await fetch('/api/ingest'); const data=await fetchSummary(); document.getElementById('total').innerText=data.total; document.getElementById('highCount').innerText=data.recent_high.length; drawCharts(data); await loadEvents(); }
-fetchSummary().then(drawCharts); setInterval(refreshData, 30000);
+function renderFail2Ban(data){
+ const profiles=document.getElementById('fail2banProfiles');
+ profiles.innerHTML=(data.profiles||[]).map(profile=>{
+  const active=profile.name===data.active_profile;
+  return `<div class="profile-card ${active?'active':''}">
+    <div><strong>${escapeHtml(profile.label)}</strong><span>${escapeHtml(profile.description)}</span></div>
+    <button ${profile.available?'':'disabled'} onclick="switchFail2BanProfile('${escapeHtml(profile.name)}')">${active?'Active':'Switch'}</button>
+  </div>`;
+ }).join('') || '<p class="muted">No bundled fail2ban profiles found.</p>';
+
+ const whitelist=document.getElementById('whitelistList');
+ whitelist.innerHTML=(data.whitelist||[]).map(ip=>{
+  const protectedIp=ip==='127.0.0.1/8'||ip==='::1';
+  return `<span class="tag">${escapeHtml(ip)}${protectedIp?'':` <button onclick="removeWhitelist('${escapeHtml(ip)}')">x</button>`}</span>`;
+ }).join('') || '<p class="muted">No whitelist entries found.</p>';
+
+ const jails=data.jails||[];
+ const jailNames=jails.map(j=>j.jail).filter(Boolean);
+ if(jailNames.length && !document.getElementById('banJail').value){
+  document.getElementById('banJail').value=jailNames[0];
+ }
+ const jailList=document.getElementById('fail2banJails');
+ jailList.innerHTML=jails.map(jail=>{
+  const ips=(jail.banned_ips||[]).map(ip=>`<span class="tag danger">${escapeHtml(ip)} <button onclick="unbanIp('${escapeHtml(jail.jail)}','${escapeHtml(ip)}')">unban</button></span>`).join('');
+  return `<div class="jail-card">
+    <div class="jail-header"><strong>${escapeHtml(jail.jail)}</strong><span>${escapeHtml(jail.currently_banned ?? 0)} currently banned</span></div>
+    <div class="stats-line"><span>Failed now: ${escapeHtml(jail.currently_failed ?? 0)}</span><span>Total failed: ${escapeHtml(jail.total_failed ?? 0)}</span><span>Total banned: ${escapeHtml(jail.total_banned ?? 0)}</span></div>
+    <div class="tag-list">${ips||'<span class="muted">No banned IPs in this jail.</span>'}</div>
+  </div>`;
+ }).join('') || '<p class="muted">No fail2ban jails matched your search.</p>';
+}
+async function loadFail2Ban(quiet=false){
+ const search=document.getElementById('fail2banSearch')?.value||'';
+ try{
+  const data=await requestJson(`/api/fail2ban?search=${encodeURIComponent(search)}`);
+  renderFail2Ban(data);
+  if(!quiet) showFail2BanMessage('Fail2Ban data refreshed.');
+ }catch(err){
+  showFail2BanMessage(err.message, true);
+ }
+}
+async function switchFail2BanProfile(profile){
+ if(!confirm(`Switch fail2ban to the ${profile} profile and reload fail2ban?`)) return;
+ try{
+  await requestJson('/api/fail2ban/config',{method:'POST',body:JSON.stringify({profile})});
+  showFail2BanMessage(`Switched fail2ban profile to ${profile}.`);
+  await loadFail2Ban(true);
+ }catch(err){ showFail2BanMessage(err.message, true); }
+}
+async function addWhitelist(){
+ const ip=document.getElementById('whitelistIp').value.trim();
+ if(!ip) return showFail2BanMessage('Enter an IP or CIDR range to whitelist.', true);
+ try{
+  await requestJson('/api/fail2ban/whitelist',{method:'POST',body:JSON.stringify({ip})});
+  document.getElementById('whitelistIp').value='';
+  showFail2BanMessage(`${ip} added to fail2ban whitelist.`);
+  await loadFail2Ban(true);
+ }catch(err){ showFail2BanMessage(err.message, true); }
+}
+async function removeWhitelist(ip){
+ if(!confirm(`Remove ${ip} from the fail2ban whitelist?`)) return;
+ try{
+  await requestJson('/api/fail2ban/whitelist/remove',{method:'POST',body:JSON.stringify({ip})});
+  showFail2BanMessage(`${ip} removed from fail2ban whitelist.`);
+  await loadFail2Ban(true);
+ }catch(err){ showFail2BanMessage(err.message, true); }
+}
+async function banFail2BanIp(){
+ const jail=document.getElementById('banJail').value.trim();
+ const ip=document.getElementById('banAddress').value.trim();
+ if(!jail||!ip) return showFail2BanMessage('Enter both a jail and an IP to ban.', true);
+ try{
+  await requestJson('/api/fail2ban/ban',{method:'POST',body:JSON.stringify({jail,ip})});
+  document.getElementById('banAddress').value='';
+  showFail2BanMessage(`${ip} banned in ${jail}.`);
+  await loadFail2Ban(true);
+ }catch(err){ showFail2BanMessage(err.message, true); }
+}
+async function unbanIp(jail, ip){
+ try{
+  await requestJson('/api/fail2ban/unban',{method:'POST',body:JSON.stringify({jail,ip})});
+  showFail2BanMessage(`${ip} unbanned from ${jail}.`);
+  await loadFail2Ban(true);
+ }catch(err){ showFail2BanMessage(err.message, true); }
+}
+async function refreshData(){ await fetch('/api/ingest'); const data=await fetchSummary(); document.getElementById('total').innerText=data.total; document.getElementById('highCount').innerText=data.recent_high.length; drawCharts(data); await loadEvents(); await loadFail2Ban(true); }
+fetchSummary().then(drawCharts); loadFail2Ban(true); setInterval(refreshData, 30000);
 </script>
 </body></html>
