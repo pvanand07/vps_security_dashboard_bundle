@@ -295,6 +295,28 @@ def api_failed_usernames(limit: int = Query(20, le=100)):
     return {"usernames": top, "total_unique": len(counts), "total_attempts": sum(counts.values())}
 
 
+@app.post("/api/geo-batch")
+async def api_geo_batch(request: Request):
+    import urllib.request as urlreq
+    import json as _json
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    try:
+        req = urlreq.Request(
+            "http://ip-api.com/batch?fields=status,query,country,countryCode,isp,org",
+            data=_json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlreq.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read())
+        return JSONResponse(data)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"geo lookup failed: {e}")
+
+
 @app.post("/api/unblock")
 async def api_unblock(request: Request):
     import re
