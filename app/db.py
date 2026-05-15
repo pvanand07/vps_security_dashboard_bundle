@@ -40,6 +40,23 @@ def insert_event(event):
         )
     conn.close()
 
+def bulk_insert_events(events):
+    if not events:
+        return
+    conn = connect()
+    with conn:
+        conn.executemany(
+            """INSERT OR IGNORE INTO events
+            (ts, source, severity, category, ip, username, message, raw, fingerprint)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (e.get("ts"), e.get("source"), e.get("severity"), e.get("category"),
+                 e.get("ip"), e.get("username"), e.get("message"), e.get("raw"), e.get("fingerprint"))
+                for e in events
+            ]
+        )
+    conn.close()
+
 def query_events(limit=200, source=None, severity=None, ip=None):
     conn = connect()
     sql = "SELECT * FROM events WHERE 1=1"

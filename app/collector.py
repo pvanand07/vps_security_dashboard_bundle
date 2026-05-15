@@ -1,7 +1,7 @@
 from pathlib import Path
 from .config import LOG_SOURCES
 from .parsers import parse_line
-from .db import insert_event
+from .db import bulk_insert_events
 
 def existing_file(paths):
     for p in paths:
@@ -21,10 +21,12 @@ def ingest_tail(lines_per_file=2000):
                 lines = f.readlines()[-lines_per_file:]
         except PermissionError:
             continue
+        events = []
         for line in lines:
             if not line.strip():
                 continue
             event = parse_line(source, line)
-            insert_event(event)
-            count += 1
+            events.append(event)
+        bulk_insert_events(events)
+        count += len(events)
     return count
