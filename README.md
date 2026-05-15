@@ -21,6 +21,8 @@ The dashboard can manage Fail2Ban from the UI and JSON API:
 
 These controls require access to the Fail2Ban socket and write access to `/etc/fail2ban`. Keep the dashboard behind an SSH tunnel, VPN, or authenticated reverse proxy.
 
+See [`docs/fail2ban-dashboard-api.md`](docs/fail2ban-dashboard-api.md) for the Fail2Ban API reference.
+
 ## Install
 ```bash
 unzip vps_security_dashboard_bundle.zip
