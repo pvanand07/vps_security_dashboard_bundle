@@ -10,9 +10,22 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import psutil
+from pydantic import BaseModel
 from .collector import ingest_tail
 from .db import query_events, summary
 from .config import APP_NAME
+from .fail2ban import (
+    Fail2BanError,
+    active_profile,
+    add_whitelist_ip,
+    available_profiles,
+    ban_ip,
+    fail2ban_status,
+    read_whitelist,
+    remove_whitelist_ip,
+    switch_profile,
+    unban_ip,
+)
 
 app = FastAPI(title=APP_NAME)
 
@@ -32,6 +45,25 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+
+class Fail2BanProfileRequest(BaseModel):
+    profile: str
+
+
+class Fail2BanIpRequest(BaseModel):
+    ip: str
+    jail: str = "sshd"
+
+
+class Fail2BanWhitelistRequest(BaseModel):
+    ip: str
+
+
+def fail2ban_http_error(exc: Fail2BanError) -> HTTPException:
+    message = str(exc)
+    status_code = 400 if message.lower().startswith(("invalid", "unknown")) else 500
+    return HTTPException(status_code=status_code, detail=message)
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
@@ -105,6 +137,59 @@ def api_system():
         "net_bytes_recv": net.bytes_recv,
         "platform": platform.machine(),
     }
+
+@app.get("/api/fail2ban")
+def api_fail2ban(search: str = ""):
+    try:
+        return fail2ban_status(search=search)
+    except Fail2BanError as exc:
+        raise fail2ban_http_error(exc)
+
+@app.get("/api/fail2ban/config")
+def api_fail2ban_config():
+    try:
+        return {
+            "active_profile": active_profile(),
+            "profiles": available_profiles(),
+            "whitelist": read_whitelist(),
+        }
+    except Fail2BanError as exc:
+        raise fail2ban_http_error(exc)
+
+@app.post("/api/fail2ban/config")
+def api_fail2ban_switch_config(body: Fail2BanProfileRequest):
+    try:
+        return switch_profile(body.profile)
+    except Fail2BanError as exc:
+        raise fail2ban_http_error(exc)
+
+@app.post("/api/fail2ban/whitelist")
+def api_fail2ban_add_whitelist(body: Fail2BanWhitelistRequest):
+    try:
+        return add_whitelist_ip(body.ip)
+    except Fail2BanError as exc:
+        raise fail2ban_http_error(exc)
+
+@app.post("/api/fail2ban/whitelist/remove")
+def api_fail2ban_remove_whitelist(body: Fail2BanWhitelistRequest):
+    try:
+        return remove_whitelist_ip(body.ip)
+    except Fail2BanError as exc:
+        raise fail2ban_http_error(exc)
+
+@app.post("/api/fail2ban/ban")
+def api_fail2ban_ban(body: Fail2BanIpRequest):
+    try:
+        return ban_ip(body.jail, body.ip)
+    except Fail2BanError as exc:
+        raise fail2ban_http_error(exc)
+
+@app.post("/api/fail2ban/unban")
+def api_fail2ban_unban(body: Fail2BanIpRequest):
+    try:
+        return unban_ip(body.jail, body.ip)
+    except Fail2BanError as exc:
+        raise fail2ban_http_error(exc)
 
 @app.post("/api/reboot")
 def api_reboot():

@@ -12,6 +12,17 @@ A lightweight FastAPI dashboard for tracking common VPS security events from SSH
 - Nginx 403/404 probes and 5xx errors
 - Sudo/session activity
 
+## Fail2Ban controls
+The dashboard can manage Fail2Ban from the UI and JSON API:
+- Switch between bundled `standard`, `enhanced`, and `paranoid` `jail.local` profiles.
+- Add or remove persistent whitelist entries in `/etc/fail2ban/jail.d/99-vps-security-dashboard-whitelist.local`.
+- Search active jails and banned IPs.
+- Manually ban and unban IPs in a selected jail.
+
+These controls require access to the Fail2Ban socket and write access to `/etc/fail2ban`. Keep the dashboard behind an SSH tunnel, VPN, or authenticated reverse proxy.
+
+See [`docs/fail2ban-dashboard-api.md`](docs/fail2ban-dashboard-api.md) for the Fail2Ban API reference.
+
 ## Install
 ```bash
 unzip vps_security_dashboard_bundle.zip

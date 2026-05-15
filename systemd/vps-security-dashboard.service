@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=vpsdash
+User=root
 Group=adm
 WorkingDirectory=/opt/vps-security-dashboard
 ExecStart=/opt/vps-security-dashboard/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090
@@ -13,6 +13,7 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+ReadWritePaths=/etc/fail2ban /var/lib/vps-security-dashboard
 ProtectHome=true
 
 [Install]
