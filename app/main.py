@@ -1,11 +1,13 @@
 import os
+import secrets
 import time
 import socket
 import platform
 import subprocess
 from pathlib import Path
-from fastapi import FastAPI, Request, Query, HTTPException
+from fastapi import Depends, FastAPI, Request, Query, HTTPException, Security
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +28,30 @@ from .fail2ban import (
     switch_profile,
     unban_ip,
 )
+
+_API_KEY_HEADER = APIKeyHeader(name="X-VPS-API-Key", auto_error=False)
+
+
+def _get_configured_key() -> str:
+    key = os.environ.get("VPS_DASHBOARD_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError(
+            "VPS_DASHBOARD_API_KEY environment variable is not set. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    return key
+
+
+def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> None:
+    if not api_key:
+        raise HTTPException(status_code=401, detail="Missing X-VPS-API-Key header")
+    try:
+        configured = _get_configured_key()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    if not secrets.compare_digest(api_key, configured):
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
 
 app = FastAPI(title=APP_NAME)
 
@@ -72,20 +98,20 @@ def dashboard(request: Request):
     events = query_events(limit=100)
     return templates.TemplateResponse("index.html", {"request": request, "data": data, "events": events, "app_name": APP_NAME})
 
-@app.get("/api/ingest")
+@app.get("/api/ingest", dependencies=[Depends(require_api_key)])
 def api_ingest(lines: int = 2000):
     return {"ingested_lines_checked": ingest_tail(lines)}
 
-@app.get("/api/events")
+@app.get("/api/events", dependencies=[Depends(require_api_key)])
 def api_events(limit: int = Query(200, le=2000), source: str | None = None, severity: str | None = None, ip: str | None = None):
     return JSONResponse(query_events(limit=limit, source=source, severity=severity, ip=ip))
 
-@app.get("/api/summary")
+@app.get("/api/summary", dependencies=[Depends(require_api_key)])
 def api_summary():
     ingest_tail(2000)
     return summary()
 
-@app.get("/api/system")
+@app.get("/api/system", dependencies=[Depends(require_api_key)])
 def api_system():
     boot_time = psutil.boot_time()
     uptime_seconds = int(time.time() - boot_time)
@@ -138,14 +164,14 @@ def api_system():
         "platform": platform.machine(),
     }
 
-@app.get("/api/fail2ban")
+@app.get("/api/fail2ban", dependencies=[Depends(require_api_key)])
 def api_fail2ban(search: str = ""):
     try:
         return fail2ban_status(search=search)
     except Fail2BanError as exc:
         raise fail2ban_http_error(exc)
 
-@app.get("/api/fail2ban/config")
+@app.get("/api/fail2ban/config", dependencies=[Depends(require_api_key)])
 def api_fail2ban_config():
     try:
         return {
@@ -156,42 +182,42 @@ def api_fail2ban_config():
     except Fail2BanError as exc:
         raise fail2ban_http_error(exc)
 
-@app.post("/api/fail2ban/config")
+@app.post("/api/fail2ban/config", dependencies=[Depends(require_api_key)])
 def api_fail2ban_switch_config(body: Fail2BanProfileRequest):
     try:
         return switch_profile(body.profile)
     except Fail2BanError as exc:
         raise fail2ban_http_error(exc)
 
-@app.post("/api/fail2ban/whitelist")
+@app.post("/api/fail2ban/whitelist", dependencies=[Depends(require_api_key)])
 def api_fail2ban_add_whitelist(body: Fail2BanWhitelistRequest):
     try:
         return add_whitelist_ip(body.ip)
     except Fail2BanError as exc:
         raise fail2ban_http_error(exc)
 
-@app.post("/api/fail2ban/whitelist/remove")
+@app.post("/api/fail2ban/whitelist/remove", dependencies=[Depends(require_api_key)])
 def api_fail2ban_remove_whitelist(body: Fail2BanWhitelistRequest):
     try:
         return remove_whitelist_ip(body.ip)
     except Fail2BanError as exc:
         raise fail2ban_http_error(exc)
 
-@app.post("/api/fail2ban/ban")
+@app.post("/api/fail2ban/ban", dependencies=[Depends(require_api_key)])
 def api_fail2ban_ban(body: Fail2BanIpRequest):
     try:
         return ban_ip(body.jail, body.ip)
     except Fail2BanError as exc:
         raise fail2ban_http_error(exc)
 
-@app.post("/api/fail2ban/unban")
+@app.post("/api/fail2ban/unban", dependencies=[Depends(require_api_key)])
 def api_fail2ban_unban(body: Fail2BanIpRequest):
     try:
         return unban_ip(body.jail, body.ip)
     except Fail2BanError as exc:
         raise fail2ban_http_error(exc)
 
-@app.post("/api/reboot")
+@app.post("/api/reboot", dependencies=[Depends(require_api_key)])
 def api_reboot():
     try:
         subprocess.Popen(["shutdown", "-r", "+1"])
@@ -199,7 +225,7 @@ def api_reboot():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/ssh-sessions")
+@app.get("/api/ssh-sessions", dependencies=[Depends(require_api_key)])
 def api_ssh_sessions():
     import re
     from collections import OrderedDict
@@ -261,7 +287,7 @@ def api_ssh_sessions():
     return {"sessions": result, "count": len(result)}
 
 
-@app.get("/api/failed-usernames")
+@app.get("/api/failed-usernames", dependencies=[Depends(require_api_key)])
 def api_failed_usernames(limit: int = Query(20, le=100)):
     from collections import Counter
     import re
@@ -295,7 +321,7 @@ def api_failed_usernames(limit: int = Query(20, le=100)):
     return {"usernames": top, "total_unique": len(counts), "total_attempts": sum(counts.values())}
 
 
-@app.post("/api/geo-batch")
+@app.post("/api/geo-batch", dependencies=[Depends(require_api_key)])
 async def api_geo_batch(request: Request):
     import urllib.request as urlreq
     import json as _json
@@ -317,7 +343,7 @@ async def api_geo_batch(request: Request):
         raise HTTPException(status_code=502, detail=f"geo lookup failed: {e}")
 
 
-@app.post("/api/unblock")
+@app.post("/api/unblock", dependencies=[Depends(require_api_key)])
 async def api_unblock(request: Request):
     import re
     try:

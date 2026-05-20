@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "0.0.0.0:8090:8090"
+    environment:
+      - VPS_DASHBOARD_API_KEY=${VPS_DASHBOARD_API_KEY:?VPS_DASHBOARD_API_KEY is required. Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"}
     volumes:
       - vpsdash-data:/var/lib/vps-security-dashboard
       - /var/log:/var/log:ro
